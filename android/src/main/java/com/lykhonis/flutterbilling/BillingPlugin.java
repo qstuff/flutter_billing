@@ -80,28 +80,40 @@ public final class BillingPlugin implements MethodCallHandler {
     public void onMethodCall(MethodCall methodCall, Result result) {
         if ("fetchPurchases".equals(methodCall.method)) {
             fetchPurchases(result);
+        } else if ("fetchSubscriptions".equals(methodCall.method)) {
+            fetchSubscriptions(result);
+        }
+        else if ("fetchProducts".equals(methodCall.method)) {
+            fetchProducts(
+                    methodCall.<List<String>>argument("identifiers"),
+                    methodCall.<String>argument("type"),
+                    result);
         } else if ("purchase".equals(methodCall.method)) {
             purchase(methodCall.<String>argument("identifier"), result);
-        } else if ("fetchProducts".equals(methodCall.method)) {
-            fetchProducts(methodCall.<List<String>>argument("identifiers"), result);
+        } else if ("subscribe".equals(methodCall.method)) {
+            subscribe(methodCall.<String>argument("identifier"), result);
         } else {
             result.notImplemented();
         }
     }
 
-    private void fetchProducts(final List<String> identifiers, final Result result) {
+    private void fetchProducts(final List<String> identifiers, final String type, final Result result) {
+        Log.d("BillingPlugin","fetchProducts(): type: " + type);
+
         executeServiceRequest(new Request() {
             @Override
             public void execute() {
                 billingClient.querySkuDetailsAsync(
                         SkuDetailsParams.newBuilder()
                                         .setSkusList(identifiers)
-                                        .setType(SkuType.INAPP)
+                                        .setType(type)
                                         .build(),
                         new SkuDetailsResponseListener() {
                             @Override
                             public void onSkuDetailsResponse(int responseCode, List<SkuDetails> skuDetailsList) {
                                 if (responseCode == BillingResponse.OK) {
+                                    Log.d("BillingPlugin", "fetchProducts(): SUCCESS");
+
                                     final List<Map<String, Object>> products = new ArrayList<>();
 
                                     for (SkuDetails details : skuDetailsList) {
@@ -117,7 +129,9 @@ public final class BillingPlugin implements MethodCallHandler {
 
                                     result.success(products);
                                 } else {
-                                    result.error("ERROR", "Failed to fetch products!", null);
+                                    Log.d("BillingPlugin", "fetchProducts(): ERROR: Failed to fetch products!");
+
+                                    result.error("ERROR", "fetchProducts(): Failed to fetch products!", null);
                                 }
                             }
                         });
@@ -125,6 +139,8 @@ public final class BillingPlugin implements MethodCallHandler {
 
             @Override
             public void failed() {
+                Log.d("BillingPlugin", "ERROR: Billing service is unavailable!");
+
                 result.error("UNAVAILABLE", "Billing service is unavailable!", null);
             }
         });
@@ -160,6 +176,52 @@ public final class BillingPlugin implements MethodCallHandler {
             @Override
             public void execute() {
                 final Purchase.PurchasesResult purchasesResult = billingClient.queryPurchases(SkuType.INAPP);
+                final int responseCode = purchasesResult.getResponseCode();
+
+                if (responseCode == BillingResponse.OK) {
+                    result.success(getIdentifiers(purchasesResult.getPurchasesList()));
+                } else {
+                    result.error("ERROR", "Failed to query purchases with error " + responseCode, null);
+                }
+            }
+
+            @Override
+            public void failed() {
+                result.error("UNAVAILABLE", "Billing service is unavailable!", null);
+            }
+        });
+    }
+
+    private void subscribe(final String identifier, final Result result) {
+        executeServiceRequest(new Request() {
+            @Override
+            public void execute() {
+                final int responseCode = billingClient.launchBillingFlow(
+                        activity,
+                        BillingFlowParams.newBuilder()
+                                .setSku(identifier)
+                                .setType(SkuType.SUBS)
+                                .build());
+
+                if (responseCode == BillingResponse.OK) {
+                    pendingPurchaseRequests.put(identifier, result);
+                } else {
+                    result.error("ERROR", "Failed to launch billing flow to subscribe an item with error " + responseCode, null);
+                }
+            }
+
+            @Override
+            public void failed() {
+                result.error("UNAVAILABLE", "Billing service is unavailable!", null);
+            }
+        });
+    }
+
+    private void fetchSubscriptions(final Result result) {
+        executeServiceRequest(new Request() {
+            @Override
+            public void execute() {
+                final Purchase.PurchasesResult purchasesResult = billingClient.queryPurchases(SkuType.SUBS);
                 final int responseCode = purchasesResult.getResponseCode();
 
                 if (responseCode == BillingResponse.OK) {

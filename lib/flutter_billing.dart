@@ -76,8 +76,13 @@ class Billing {
 
   final BillingErrorCallback _onError;
   final Map<String, BillingProduct> _cachedProducts = new Map();
+
   final Set<String> _purchasedProducts = new Set();
   bool _purchasesFetched = false;
+
+  final Set<String> _subscribedProducts = new Set();
+  bool _subscriptionsFetched = false;
+
 
   /// Products details of supplied product identifiers.
   ///
@@ -86,7 +91,8 @@ class Billing {
   /// Note the behavior may differ from iOS and Android. Android most likely to throw in a case
   /// of error, while iOS would return a list of only products that are available. In a case of
   /// error, it would return simply empty list.
-  Future<List<BillingProduct>> getProducts(List<String> identifiers) {
+
+  Future<List<BillingProduct>> getProducts(List<String> identifiers, String type) {
     assert(identifiers != null);
     if (_cachedProducts.keys.toSet().containsAll(identifiers)) {
       return new Future.value(
@@ -95,7 +101,7 @@ class Billing {
     return synchronized(this, () async {
       try {
         final Map<String, BillingProduct> products = new Map.fromIterable(
-          await _channel.invokeMethod('fetchProducts', {'identifiers': identifiers}),
+          await _channel.invokeMethod('fetchProducts', {'identifiers': identifiers, 'type': type} ),
           key: (product) => product['identifier'],
           value: (product) => new BillingProduct(
                 identifier: product['identifier'],
@@ -118,10 +124,44 @@ class Billing {
   /// Product details of supplied product identifier.
   ///
   /// Returns a product details or null if one is not available or error occurred.
-  Future<BillingProduct> getProduct(String identifier) async {
-    final List<BillingProduct> products = await getProducts(<String>[identifier]);
+  Future<BillingProduct> getProduct(String identifier, String type) async {
+    final List<BillingProduct> products = await getProducts(<String>[identifier], type);
     return products.firstWhere((product) => product.identifier == identifier, orElse: () => null);
   }
+
+
+  /// Subscribed products identifiers.
+  ///
+  /// Returns products identifiers that are already subscribed.
+  Future<Set<String>> getSubscriptions() {
+
+    if (_subscriptionsFetched) {
+      return new Future.value(new Set.from(_subscribedProducts));
+    }
+
+    return synchronized(this, () async {
+      try {
+        final List subscriptions = await _channel.invokeMethod('fetchSubscriptions');
+        _subscribedProducts.addAll(subscriptions.cast());
+        _subscriptionsFetched = true;
+        return _subscribedProducts;
+      } catch (e) {
+        if (_onError != null) _onError(e);
+        return new Set.identity();
+      }
+    });
+  }
+
+  /// Validate if a product is purchased.
+  ///
+  /// Returns true if a product is purchased, otherwise false.
+  Future<bool> isSubscribed(String identifier) async {
+    assert(identifier != null);
+    final Set<String> subscriptions = await getSubscriptions();
+    return subscriptions.contains(identifier);
+  }
+
+
 
   /// Purchased products identifiers.
   ///

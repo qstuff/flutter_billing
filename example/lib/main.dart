@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_billing/flutter_billing.dart';
 
 void main() => runApp(new MyApp());
 
@@ -11,6 +13,8 @@ class _MyAppState extends State<MyApp> {
   @override
   initState() {
     super.initState();
+
+    _initBilling();
   }
 
   @override
@@ -26,4 +30,28 @@ class _MyAppState extends State<MyApp> {
       ),
     );
   }
+
+  void _initBilling() {
+    print("initBilling()");
+
+    Billing billing = new Billing();
+
+    billing.getProducts(<String>['my.product.id', 'my.other.product.id',],
+        'subs').then((billingProducts) {
+      print("initBilling(): got products: ${billingProducts.length}");
+
+    }, onError: (Object o) {
+      print("initBilling(): got an error");
+    });
+
+    print("_initBilling(): getSubscriptions():");
+
+    billing.getSubscriptions().then((subscriptions) {
+      print("initBilling(): subscriptions: ${subscriptions.length}");
+    }, onError: (Object o) {
+      print("initBilling(): getSubscriptions(): got an error");
+    });
+  }
+
+
 }
