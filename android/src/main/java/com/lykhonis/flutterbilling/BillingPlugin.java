@@ -112,11 +112,13 @@ public final class BillingPlugin implements MethodCallHandler {
                             @Override
                             public void onSkuDetailsResponse(int responseCode, List<SkuDetails> skuDetailsList) {
                                 if (responseCode == BillingResponse.OK) {
-                                    Log.d("BillingPlugin", "fetchProducts(): SUCCESS");
+                                    Log.d("BillingPlugin", "fetchProducts(): SUCCESS, num products:" + skuDetailsList.size());
 
                                     final List<Map<String, Object>> products = new ArrayList<>();
 
                                     for (SkuDetails details : skuDetailsList) {
+                                        Log.d("BillingPlugin", "fetchProducts(): SKU detail:" + details.getSku());
+
                                         final Map<String, Object> product = new HashMap<>();
                                         product.put("identifier", details.getSku());
                                         product.put("price", details.getPrice());
