@@ -16,8 +16,11 @@ import com.android.billingclient.api.SkuDetails;
 import com.android.billingclient.api.SkuDetailsParams;
 import com.android.billingclient.api.SkuDetailsResponseListener;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +37,8 @@ public final class BillingPlugin implements MethodCallHandler {
     private final Activity activity;
     private final BillingClient billingClient;
     private final Map<String, Result> pendingPurchaseRequests;
+    private final Map<String, Result> pendingSubscriptionRequests;
+
     private boolean billingServiceConnected;
 
     public static void registerWith(Registrar registrar) {
@@ -45,6 +50,7 @@ public final class BillingPlugin implements MethodCallHandler {
         this.activity = activity;
 
         pendingPurchaseRequests = new HashMap<>();
+        pendingSubscriptionRequests = new HashMap<>();
 
         billingClient = BillingClient.newBuilder(activity)
                                      .setListener(new BillingListener())
@@ -74,6 +80,8 @@ public final class BillingPlugin implements MethodCallHandler {
                 Log.d(TAG, "Failed to setup billing service!");
             }
         });
+
+
     }
 
     @Override
@@ -98,7 +106,6 @@ public final class BillingPlugin implements MethodCallHandler {
     }
 
     private void fetchProducts(final List<String> identifiers, final String type, final Result result) {
-        Log.d("BillingPlugin","fetchProducts(): type: " + type);
 
         executeServiceRequest(new Request() {
             @Override
@@ -112,13 +119,9 @@ public final class BillingPlugin implements MethodCallHandler {
                             @Override
                             public void onSkuDetailsResponse(int responseCode, List<SkuDetails> skuDetailsList) {
                                 if (responseCode == BillingResponse.OK) {
-                                    Log.d("BillingPlugin", "fetchProducts(): SUCCESS, num products:" + skuDetailsList.size());
-
                                     final List<Map<String, Object>> products = new ArrayList<>();
 
                                     for (SkuDetails details : skuDetailsList) {
-                                        Log.d("BillingPlugin", "fetchProducts(): SKU detail:" + details.getSku());
-
                                         final Map<String, Object> product = new HashMap<>();
                                         product.put("identifier", details.getSku());
                                         product.put("price", details.getPrice());
@@ -131,8 +134,6 @@ public final class BillingPlugin implements MethodCallHandler {
 
                                     result.success(products);
                                 } else {
-                                    Log.d("BillingPlugin", "fetchProducts(): ERROR: Failed to fetch products!");
-
                                     result.error("ERROR", "fetchProducts(): Failed to fetch products!", null);
                                 }
                             }
@@ -141,8 +142,6 @@ public final class BillingPlugin implements MethodCallHandler {
 
             @Override
             public void failed() {
-                Log.d("BillingPlugin", "ERROR: Billing service is unavailable!");
-
                 result.error("UNAVAILABLE", "Billing service is unavailable!", null);
             }
         });
@@ -195,6 +194,7 @@ public final class BillingPlugin implements MethodCallHandler {
     }
 
     private void subscribe(final String identifier, final Result result) {
+        Log.v(TAG,"subscribe(): product_id: " + identifier);
         executeServiceRequest(new Request() {
             @Override
             public void execute() {
@@ -206,20 +206,32 @@ public final class BillingPlugin implements MethodCallHandler {
                                 .build());
 
                 if (responseCode == BillingResponse.OK) {
-                    pendingPurchaseRequests.put(identifier, result);
+                    pendingSubscriptionRequests.put(identifier, result);
                 } else {
+                    Log.e(TAG, "subscribe(): ERROR: Failed to subscribe!");
                     result.error("ERROR", "Failed to launch billing flow to subscribe an item with error " + responseCode, null);
                 }
             }
 
             @Override
             public void failed() {
+                Log.e(TAG, "subscribe(): ERROR: Billing service is unavailable!!");
                 result.error("UNAVAILABLE", "Billing service is unavailable!", null);
             }
         });
     }
 
+    /**
+     * We need to pass back a list of purchases, since we need to check the purchaseTime against the
+     * subscription period in case the subscription was revoked by the user.
+     * If the subscription is revoked by the user it still appears in the purchases list, but with autorenewal set to false.
+     * In that case the subscription is still valid until the end of the current subscrition period.
+     * This verification is done on the dart side in flutter_billing.isSubscribed()
+     *
+     * @param result
+     */
     private void fetchSubscriptions(final Result result) {
+        Log.v(TAG,"fetchSubscriptions(): ");
         executeServiceRequest(new Request() {
             @Override
             public void execute() {
@@ -227,8 +239,20 @@ public final class BillingPlugin implements MethodCallHandler {
                 final int responseCode = purchasesResult.getResponseCode();
 
                 if (responseCode == BillingResponse.OK) {
-                    result.success(getIdentifiers(purchasesResult.getPurchasesList()));
+                    final List<Map<String, Object>> purchases = new ArrayList<>();
+                    for (Purchase purchase : purchasesResult.getPurchasesList()) {
+                        final Map<String, Object> product = new HashMap<>();
+                        product.put("orderId", purchase.getOrderId());
+                        product.put("packageName", purchase.getPackageName());
+                        product.put("productId", purchase.getSku());
+                        product.put("purchaseToken", purchase.getPurchaseToken());
+                        product.put("purchaseTime", purchase.getPurchaseTime());
+                        product.put("autorenewal", purchase.isAutoRenewing() ? "true" : "false");
+                        purchases.add(product);
+                    }
+                    result.success(purchases);
                 } else {
+                    Log.e(TAG, "fetchSubscriptions(): ERROR: Failed to fetch subscriptions!");
                     result.error("ERROR", "Failed to query purchases with error " + responseCode, null);
                 }
             }
@@ -297,6 +321,8 @@ public final class BillingPlugin implements MethodCallHandler {
     final class BillingListener implements PurchasesUpdatedListener {
         @Override
         public void onPurchasesUpdated(int resultCode, List<Purchase> purchases) {
+            Log.d(TAG, "onPurchasesUpdated(): ");
+
             if (resultCode == BillingResponse.OK && purchases != null) {
                 final List<String> identifiers = getIdentifiers(purchases);
 

@@ -65,6 +65,37 @@ class BillingProduct {
   }
 }
 
+/// our flutter equivalent of a purchase
+/// (https://developer.android.com/reference/com/android/billingclient/api/Purchase.html)
+class Purchase {
+
+  Purchase({
+    this.orderId,
+    this.packageName,
+    this.productId,
+    this.purchaseToken,
+    this.purchaseTime,
+    this.autorenewal,
+    }) : assert (orderId != null),
+        assert (packageName != null),
+        assert (productId != null),
+        assert (purchaseToken != null);
+
+
+  final String orderId;
+  final String packageName;
+  final String productId;
+  final String purchaseToken;
+  int          purchaseTime;
+  final String autorenewal;
+
+  @override
+  String toString() {
+    return 'Purchase{order: $orderId, package: $packageName, sku: $productId,  '
+        'token: $purchaseToken, time: $purchaseTime, autorenewal: $autorenewal}';
+  }
+}
+
 /// A billing error callback to be called when any of billing operations fail.
 typedef void BillingErrorCallback(Exception e);
 
@@ -80,8 +111,8 @@ class Billing {
   final Set<String> _purchasedProducts = new Set();
   bool _purchasesFetched = false;
 
+  final Map<String, Purchase> _fetchedSubscriptions = new Map();
   final Set<String> _subscribedProducts = new Set();
-  bool _subscriptionsFetched = false;
 
 
   /// Products details of supplied product identifiers.
@@ -94,10 +125,12 @@ class Billing {
 
   Future<List<BillingProduct>> getProducts(List<String> identifiers, String type) {
     assert(identifiers != null);
+
     if (_cachedProducts.keys.toSet().containsAll(identifiers)) {
       return new Future.value(
           identifiers.map((identifier) => _cachedProducts[identifier]).toList());
     }
+
     return synchronized(this, () async {
       try {
         final Map<String, BillingProduct> products = new Map.fromIterable(
@@ -112,6 +145,7 @@ class Billing {
                 amount: product['amount'],
               ),
         );
+
         _cachedProducts.addAll(products);
         return products.values.toList();
       } catch (e) {
@@ -133,21 +167,28 @@ class Billing {
   /// Subscribed products identifiers.
   ///
   /// Returns products identifiers that are already subscribed.
-  Future<Set<String>> getSubscriptions() {
-
-    if (_subscriptionsFetched) {
-      return new Future.value(new Set.from(_subscribedProducts));
-    }
+  Future<List<Purchase>> getSubscriptions() {
 
     return synchronized(this, () async {
       try {
-        final List subscriptions = await _channel.invokeMethod('fetchSubscriptions');
-        _subscribedProducts.addAll(subscriptions.cast());
-        _subscriptionsFetched = true;
-        return _subscribedProducts;
+        final Map<String, Purchase> purchases = new Map.fromIterable(
+          await _channel.invokeMethod('fetchSubscriptions'),
+          key: (purchase) => purchase ['orderId'],
+          value: (purchase) => new Purchase(
+            orderId: purchase['orderId'],
+            packageName: purchase['packageName'],
+            productId: purchase['productId'],
+            purchaseToken: purchase['purchaseToken'],
+            purchaseTime: purchase['purchaseTime'],
+            autorenewal: purchase['autorenewal'],
+          ),
+      );
+
+        _fetchedSubscriptions.addAll(purchases);
+        return purchases.values.toList();
       } catch (e) {
         if (_onError != null) _onError(e);
-        return new Set.identity();
+        return <Purchase>[];
       }
     });
   }
@@ -155,12 +196,54 @@ class Billing {
   /// Validate if a product is purchased.
   ///
   /// Returns true if a product is purchased, otherwise false.
-  Future<bool> isSubscribed(String identifier) async {
-    assert(identifier != null);
-    final Set<String> subscriptions = await getSubscriptions();
-    return subscriptions.contains(identifier);
+  Future<bool> isSubscribed(String identifier, int subscriptionPeriodMillis) async {
+
+    final List<Purchase> purchases = await getSubscriptions();
+    bool isSubscribed = false;
+
+    purchases.forEach((purchase) {
+
+      // is product id in subscription list?
+      if (purchase.productId == identifier) {
+
+        // is subscription active?
+        if (purchase.autorenewal == "false") {
+
+          DateTime now = new DateTime.now();
+          DateTime expirationDate = new DateTime.fromMillisecondsSinceEpoch(purchase.purchaseTime + subscriptionPeriodMillis);
+
+          // is expired
+          if (expirationDate.isAfter(now)) {
+            isSubscribed = true;
+          }
+        } else {
+          isSubscribed =  true;
+        }
+      }
+    });
+    return isSubscribed;
   }
 
+  /// Subscribe a product.
+  ///
+  /// This would trigger platform UI to walk a user through steps of purchasing the product.
+  /// Returns updated list of product identifiers that have been purchased.
+  Future<bool> subscribe(String identifier) {
+    assert(identifier != null);
+    if (_subscribedProducts.contains(identifier)) {
+      return new Future.value(true);
+    }
+    return synchronized(this, () async {
+      try {
+        final List subscriptions = await _channel.invokeMethod('subscribe', {'identifier': identifier});
+        _subscribedProducts.addAll(subscriptions.cast());
+        return subscriptions.contains(identifier);
+      } catch (e) {
+        if (_onError != null) _onError(e);
+        return false;
+      }
+    });
+  }
 
 
   /// Purchased products identifiers.
