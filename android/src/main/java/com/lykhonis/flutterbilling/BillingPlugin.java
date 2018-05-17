@@ -16,11 +16,8 @@ import com.android.billingclient.api.SkuDetails;
 import com.android.billingclient.api.SkuDetailsParams;
 import com.android.billingclient.api.SkuDetailsResponseListener;
 
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Collections;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,7 +34,6 @@ public final class BillingPlugin implements MethodCallHandler {
     private final Activity activity;
     private final BillingClient billingClient;
     private final Map<String, Result> pendingPurchaseRequests;
-    private final Map<String, Result> pendingSubscriptionRequests;
 
     private boolean billingServiceConnected;
 
@@ -50,7 +46,6 @@ public final class BillingPlugin implements MethodCallHandler {
         this.activity = activity;
 
         pendingPurchaseRequests = new HashMap<>();
-        pendingSubscriptionRequests = new HashMap<>();
 
         billingClient = BillingClient.newBuilder(activity)
                                      .setListener(new BillingListener())
@@ -80,24 +75,21 @@ public final class BillingPlugin implements MethodCallHandler {
                 Log.d(TAG, "Failed to setup billing service!");
             }
         });
-
-
     }
 
     @Override
     public void onMethodCall(MethodCall methodCall, Result result) {
-        if ("fetchPurchases".equals(methodCall.method)) {
-            fetchPurchases(result);
-        } else if ("fetchSubscriptions".equals(methodCall.method)) {
-            fetchSubscriptions(result);
-        }
-        else if ("fetchProducts".equals(methodCall.method)) {
+        if ("fetchProducts".equals(methodCall.method)) {
             fetchProducts(
-                    methodCall.<List<String>>argument("identifiers"),
-                    methodCall.<String>argument("type"),
-                    result);
+                methodCall.<List<String>>argument("identifiers"),
+                methodCall.<String>argument("type"),
+                result);
+        } else if ("fetchPurchases".equals(methodCall.method)) {
+            fetchPurchases(result);
         } else if ("purchase".equals(methodCall.method)) {
             purchase(methodCall.<String>argument("identifier"), result);
+        } else if ("fetchSubscriptions".equals(methodCall.method)) {
+            fetchSubscriptions(result);
         } else if ("subscribe".equals(methodCall.method)) {
             subscribe(methodCall.<String>argument("identifier"), result);
         } else {
@@ -108,36 +100,48 @@ public final class BillingPlugin implements MethodCallHandler {
     private void fetchProducts(final List<String> identifiers, final String type, final Result result) {
 
         executeServiceRequest(new Request() {
+
             @Override
             public void execute() {
                 billingClient.querySkuDetailsAsync(
-                        SkuDetailsParams.newBuilder()
-                                        .setSkusList(identifiers)
-                                        .setType(type)
-                                        .build(),
-                        new SkuDetailsResponseListener() {
-                            @Override
-                            public void onSkuDetailsResponse(int responseCode, List<SkuDetails> skuDetailsList) {
-                                if (responseCode == BillingResponse.OK) {
-                                    final List<Map<String, Object>> products = new ArrayList<>();
+                    SkuDetailsParams.newBuilder()
+                                    .setSkusList(identifiers)
+                                    .setType(type)
+                                    .build(),
+                    new SkuDetailsResponseListener() {
 
-                                    for (SkuDetails details : skuDetailsList) {
-                                        final Map<String, Object> product = new HashMap<>();
-                                        product.put("identifier", details.getSku());
-                                        product.put("price", details.getPrice());
-                                        product.put("title", details.getTitle());
-                                        product.put("description", details.getDescription());
-                                        product.put("currency", details.getPriceCurrencyCode());
-                                        product.put("amount", details.getPriceAmountMicros() / 10_000L);
-                                        products.add(product);
-                                    }
-
-                                    result.success(products);
-                                } else {
-                                    result.error("ERROR", "fetchProducts(): Failed to fetch products!", null);
-                                }
+                        @Override
+                        public void onSkuDetailsResponse(int responseCode, List<SkuDetails> skuDetailsList) {
+                            if (responseCode == BillingResponse.OK) {
+                                final List<Map<String, Object>> products = convertSkuDetailsToListOfMaps(skuDetailsList);
+                                result.success(products);
+                            } else {
+                                result.error("ERROR", "fetchProducts(): Failed to fetch products!", null);
                             }
-                        });
+                        }
+                    });
+            }
+
+            @Override
+            public void failed() {
+                result.error("UNAVAILABLE", "Billing service is unavailable!", null);
+            }
+        });
+    }
+
+    private void fetchPurchases(final Result result) {
+        executeServiceRequest(new Request() {
+
+            @Override
+            public void execute() {
+                final Purchase.PurchasesResult purchasesResult = billingClient.queryPurchases(SkuType.INAPP);
+                final int responseCode = purchasesResult.getResponseCode();
+
+                if (responseCode == BillingResponse.OK) {
+                    result.success(convertPurchasesToListOfMaps(purchasesResult.getPurchasesList()));
+                } else {
+                    result.error("ERROR", "Failed to query purchases with error " + responseCode, null);
+                }
             }
 
             @Override
@@ -172,15 +176,26 @@ public final class BillingPlugin implements MethodCallHandler {
         });
     }
 
-    private void fetchPurchases(final Result result) {
+    /**
+     * We need to pass back a list of purchases, since we need to check the purchaseTime against the
+     * subscription period in case the subscription was revoked by the user.
+     * If the subscription is revoked by the user it still appears in the purchases list, but with autorenewal set to false.
+     * In that case the subscription is still valid until the end of the current subscrition period.
+     * This verification is done on the dart side in flutter_billing.isSubscribed()
+     *
+     * @param result
+     */
+    private void fetchSubscriptions(final Result result) {
         executeServiceRequest(new Request() {
             @Override
             public void execute() {
-                final Purchase.PurchasesResult purchasesResult = billingClient.queryPurchases(SkuType.INAPP);
+                final Purchase.PurchasesResult purchasesResult = billingClient.queryPurchases(SkuType.SUBS);
                 final int responseCode = purchasesResult.getResponseCode();
 
                 if (responseCode == BillingResponse.OK) {
-                    result.success(getIdentifiers(purchasesResult.getPurchasesList()));
+                    final List<Map<String, Object>> purchases =
+                        convertPurchasesToListOfMaps(purchasesResult.getPurchasesList());
+                    result.success(purchases);
                 } else {
                     result.error("ERROR", "Failed to query purchases with error " + responseCode, null);
                 }
@@ -194,7 +209,6 @@ public final class BillingPlugin implements MethodCallHandler {
     }
 
     private void subscribe(final String identifier, final Result result) {
-        Log.v(TAG,"subscribe(): product_id: " + identifier);
         executeServiceRequest(new Request() {
             @Override
             public void execute() {
@@ -206,74 +220,63 @@ public final class BillingPlugin implements MethodCallHandler {
                                 .build());
 
                 if (responseCode == BillingResponse.OK) {
-                    pendingSubscriptionRequests.put(identifier, result);
+                    pendingPurchaseRequests.put(identifier, result);
                 } else {
-                    Log.e(TAG, "subscribe(): ERROR: Failed to subscribe!");
                     result.error("ERROR", "Failed to launch billing flow to subscribe an item with error " + responseCode, null);
                 }
             }
 
             @Override
             public void failed() {
-                Log.e(TAG, "subscribe(): ERROR: Billing service is unavailable!!");
                 result.error("UNAVAILABLE", "Billing service is unavailable!", null);
             }
         });
     }
 
-    /**
-     * We need to pass back a list of purchases, since we need to check the purchaseTime against the
-     * subscription period in case the subscription was revoked by the user.
-     * If the subscription is revoked by the user it still appears in the purchases list, but with autorenewal set to false.
-     * In that case the subscription is still valid until the end of the current subscrition period.
-     * This verification is done on the dart side in flutter_billing.isSubscribed()
-     *
-     * @param result
-     */
-    private void fetchSubscriptions(final Result result) {
-        Log.v(TAG,"fetchSubscriptions(): ");
-        executeServiceRequest(new Request() {
-            @Override
-            public void execute() {
-                final Purchase.PurchasesResult purchasesResult = billingClient.queryPurchases(SkuType.SUBS);
-                final int responseCode = purchasesResult.getResponseCode();
-
-                if (responseCode == BillingResponse.OK) {
-                    final List<Map<String, Object>> purchases = new ArrayList<>();
-                    for (Purchase purchase : purchasesResult.getPurchasesList()) {
-                        final Map<String, Object> product = new HashMap<>();
-                        product.put("orderId", purchase.getOrderId());
-                        product.put("packageName", purchase.getPackageName());
-                        product.put("productId", purchase.getSku());
-                        product.put("purchaseToken", purchase.getPurchaseToken());
-                        product.put("purchaseTime", purchase.getPurchaseTime());
-                        product.put("autorenewal", purchase.isAutoRenewing() ? "true" : "false");
-                        purchases.add(product);
-                    }
-                    result.success(purchases);
-                } else {
-                    Log.e(TAG, "fetchSubscriptions(): ERROR: Failed to fetch subscriptions!");
-                    result.error("ERROR", "Failed to query purchases with error " + responseCode, null);
-                }
-            }
-
-            @Override
-            public void failed() {
-                result.error("UNAVAILABLE", "Billing service is unavailable!", null);
-            }
-        });
-    }
-
-    private List<String> getIdentifiers(List<Purchase> purchases) {
-        if (purchases == null) return Collections.emptyList();
-
-        final List<String> identifiers = new ArrayList<>(purchases.size());
-
-        for (Purchase purchase : purchases) {
-            identifiers.add(purchase.getSku());
+    List<Map<String, Object>> convertSkuDetailsToListOfMaps(List<SkuDetails> details) {
+        if (details == null) {
+            return Collections.emptyList();
         }
 
-        return identifiers;
+        final List<Map<String, Object>> list = new ArrayList<>(details.size());
+        for (SkuDetails detail : details) {
+            list.add(convertSkuDetailToMap(detail));
+        }
+        return list;
+    }
+
+    static Map<String, Object> convertSkuDetailToMap(SkuDetails detail) {
+        final Map<String, Object> product = new HashMap<>();
+        product.put("identifier", detail.getSku());
+        product.put("price", detail.getPrice());
+        product.put("title", detail.getTitle());
+        product.put("description", detail.getDescription());
+        product.put("currency", detail.getPriceCurrencyCode());
+        product.put("amount", detail.getPriceAmountMicros() / 10_000L);
+        return product;
+    }
+
+    List<Map<String, Object>> convertPurchasesToListOfMaps(List<Purchase> purchases) {
+        if (purchases == null) {
+            return Collections.emptyList();
+        }
+
+        final List<Map<String, Object>> list = new ArrayList<>(purchases.size());
+        for (Purchase purchase : purchases) {
+            list.add(convertPurchaseToMap(purchase));
+        }
+        return list;
+    }
+
+    static Map<String, Object> convertPurchaseToMap(Purchase purchase) {
+        final Map<String, Object> product = new HashMap<>();
+        product.put("orderId", purchase.getOrderId());
+        product.put("packageName", purchase.getPackageName());
+        product.put("identifier", purchase.getSku());
+        product.put("purchaseToken", purchase.getPurchaseToken());
+        product.put("purchaseTime", purchase.getPurchaseTime());
+        product.put("autorenewal", purchase.isAutoRenewing() ? "true" : "false");
+        return product;
     }
 
     private void stopServiceConnection() {
@@ -321,14 +324,13 @@ public final class BillingPlugin implements MethodCallHandler {
     final class BillingListener implements PurchasesUpdatedListener {
         @Override
         public void onPurchasesUpdated(int resultCode, List<Purchase> purchases) {
-            Log.d(TAG, "onPurchasesUpdated(): ");
-
             if (resultCode == BillingResponse.OK && purchases != null) {
-                final List<String> identifiers = getIdentifiers(purchases);
-
-                for (String identifier : identifiers) {
-                    final Result result = pendingPurchaseRequests.remove(identifier);
-                    if (result != null) result.success(identifiers);
+                final List<Map<String, Object>> identifiers = convertPurchasesToListOfMaps(purchases);
+                for (final Map<String, Object> next : identifiers) {
+                    final Result result = pendingPurchaseRequests.remove(next.get("identifier"));
+                    if (result != null) {
+                        result.success(identifiers);
+                    }
                 }
             } else {
                 for (Result result : pendingPurchaseRequests.values()) {
@@ -347,31 +349,24 @@ public final class BillingPlugin implements MethodCallHandler {
 
     static class LifecycleCallback implements Application.ActivityLifecycleCallbacks {
         @Override
-        public void onActivityCreated(Activity activity, Bundle savedInstanceState) {
-        }
+        public void onActivityCreated(Activity activity, Bundle savedInstanceState) { }
 
         @Override
-        public void onActivityStarted(Activity activity) {
-        }
+        public void onActivityStarted(Activity activity) { }
 
         @Override
-        public void onActivityResumed(Activity activity) {
-        }
+        public void onActivityResumed(Activity activity) { }
 
         @Override
-        public void onActivityPaused(Activity activity) {
-        }
+        public void onActivityPaused(Activity activity) { }
 
         @Override
-        public void onActivityStopped(Activity activity) {
-        }
+        public void onActivityStopped(Activity activity) { }
 
         @Override
-        public void onActivitySaveInstanceState(Activity activity, Bundle outState) {
-        }
+        public void onActivitySaveInstanceState(Activity activity, Bundle outState) { }
 
         @Override
-        public void onActivityDestroyed(Activity activity) {
-        }
+        public void onActivityDestroyed(Activity activity) { }
     }
 }

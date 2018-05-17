@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_billing/flutter_billing.dart';
 
@@ -13,7 +12,6 @@ class _MyAppState extends State<MyApp> {
   @override
   initState() {
     super.initState();
-
     _initBilling();
   }
 
@@ -31,27 +29,27 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
-  void _initBilling() {
-    print("initBilling()");
-
+  void _initBilling() async {
     Billing billing = new Billing();
 
-    billing.getProducts(<String>['my.product.id', 'my.other.product.id',],
-        'subs').then((billingProducts) {
-      print("initBilling(): got products: ${billingProducts.length}");
-
-    }, onError: (Object o) {
-      print("initBilling(): got an error");
+    billing.getProducts(<String>['coach_yourself_training'], 'subs').then((billingProducts) {
+      print("initBilling(): got products: ${billingProducts}");
+    }, onError: (dynamic error) {
+      print("initBilling(): got an error: $error");
     });
 
-    print("_initBilling(): getSubscriptions():");
-
-    billing.getSubscriptions().then((subscriptions) {
-      print("initBilling(): subscriptions: ${subscriptions.length}");
-    }, onError: (Object o) {
-      print("initBilling(): getSubscriptions(): got an error");
+    billing.getPurchases().then((Set<String> purchases) {
+      print("initBilling(): purchases: $purchases");
+    }, onError: (dynamic error) {
+      print("initBilling(): getPurchases(): got an error: $error");
     });
+
+    final bool isPurchased = await billing.isPurchased('coach_yourself_training');
+    print('coach_yourself_training isPurchased: $isPurchased');
+
+    if (!isPurchased)
+      billing.purchase('coach_yourself_training').then((bool purchased) {
+        print('coach_yourself_training purchased: $purchased');
+      });
   }
-
-
 }
