@@ -1,4 +1,5 @@
 #import "BillingPlugin.h"
+#import "Purchase.h"
 
 @interface BillingPlugin ()
 
@@ -6,10 +7,12 @@
 @property(atomic, retain) NSMutableDictionary<NSValue *, FlutterResult> *fetchProducts;
 @property(atomic, retain) NSMutableDictionary<SKPayment *, FlutterResult> *requestedPayments;
 @property(atomic, retain) NSArray<SKProduct *> *products;
-@property(atomic, retain) NSMutableSet<NSString *> *purchases;
+@property(atomic, retain) NSMutableSet<Purchase *> *purchases;
 @property(nonatomic, retain) FlutterMethodChannel *channel;
 
 @end
+
+typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
 
 @implementation BillingPlugin
 
@@ -126,6 +129,10 @@
         NSMutableDictionary<NSString *, id> *values = [[NSMutableDictionary alloc] init];
         values[@"identifier"] = product.productIdentifier;
         values[@"price"] = [currencyFormatter stringFromNumber:product.price];
+        if ([product respondsToSelector:@selector(introductoryPrice)])
+        {
+            values[@"introductoryPrice"] = [currencyFormatter stringFromNumber:product.introductoryPrice.price];
+        }
         values[@"title"] = product.localizedTitle;
         values[@"description"] = product.localizedDescription;
         values[@"currency"] = product.priceLocale.currencyCode;
@@ -150,20 +157,34 @@
 
 - (void)paymentQueueRestoreCompletedTransactionsFinished:(SKPaymentQueue *)queue
 {
-    NSArray<FlutterResult> *results = [NSArray arrayWithArray:fetchPurchases];
-    [fetchPurchases removeAllObjects];
-
-    NSMutableArray *identifiers = [[NSMutableArray alloc] init];
-    for (NSString *identifier in purchases)
+    [self verifyReceipts:^(BOOL success)
     {
-        NSMutableDictionary *purchase = [[NSMutableDictionary alloc] init];
-        purchase[@"identifier"] = identifier;
-        [identifiers addObject:purchase];
-    }
+        NSArray<FlutterResult> *results = [NSArray arrayWithArray:fetchPurchases];
+        [fetchPurchases removeAllObjects];
 
-    [results enumerateObjectsUsingBlock:^(FlutterResult result, NSUInteger idx, BOOL *stop)
-    {
-        result(identifiers);
+        if (!success)
+        {
+            [results enumerateObjectsUsingBlock:^(FlutterResult result, NSUInteger idx, BOOL *stop)
+            {
+                result([FlutterError errorWithCode:@"ERROR" message:@"Failed to verify receipts!" details:nil]);
+            }];
+            return;
+        }
+
+        NSMutableArray *list = [[NSMutableArray alloc] init];
+        for (Purchase *purchase in purchases)
+        {
+            NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
+            result[@"identifier"] = purchase.productId;
+            result[@"purchaseTime"] = @(purchase.purchaseDate);
+            result[@"expiresTime"] = @(purchase.expiresDate);
+            [list addObject:result];
+        }
+
+        [results enumerateObjectsUsingBlock:^(FlutterResult result, NSUInteger idx, BOOL *stop)
+        {
+            result(list);
+        }];
     }];
 }
 
@@ -223,7 +244,10 @@
 
     [transactions enumerateObjectsUsingBlock:^(SKPaymentTransaction *transaction, NSUInteger idx, BOOL *stop)
     {
-        [purchases addObject:transaction.payment.productIdentifier];
+        Purchase *purchase = [Purchase purchaseWithProductId:transaction.payment.productIdentifier
+                                                purchaseDate:0
+                                                 expiresDate:0];
+        [purchases addObject:purchase];
         FlutterResult result = requestedPayments[transaction.payment];
         if (result != nil)
         {
@@ -233,17 +257,19 @@
         [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
     }];
 
-    NSMutableArray *identifiers = [[NSMutableArray alloc] init];
-    for (NSString *identifier in purchases)
+    NSMutableArray *list = [[NSMutableArray alloc] init];
+    for (Purchase *purchase in purchases)
     {
-        NSMutableDictionary *purchase = [[NSMutableDictionary alloc] init];
-        purchase[@"identifier"] = identifier;
-        [identifiers addObject:purchase];
+        NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
+        result[@"identifier"] = purchase.productId;
+        result[@"purchaseTime"] = @(purchase.purchaseDate);
+        result[@"expiresTime"] = @(purchase.expiresDate);
+        [list addObject:result];
     }
 
     [results enumerateObjectsUsingBlock:^(FlutterResult result, NSUInteger idx, BOOL *stop)
     {
-        result(identifiers);
+        result(list);
     }];
 }
 
@@ -251,11 +277,6 @@
 {
     [transactions enumerateObjectsUsingBlock:^(SKPaymentTransaction *transaction, NSUInteger idx, BOOL *stop)
     {
-        SKPaymentTransaction *original = transaction.originalTransaction;
-        if (original != nil)
-        {
-            [purchases addObject:original.payment.productIdentifier];
-        }
         [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
     }];
 }
@@ -272,6 +293,82 @@
         }
         [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
     }];
+}
+
+- (void)verifyReceipts:(VerifyReceiptsCompletionBlock)completionBlock
+{
+    NSData *receipts = [self loadReceipts];
+    if (receipts == nil)
+    {
+        completionBlock(NO);
+    }
+
+    NSURL *url = [NSURL URLWithString:@"https://sandbox.itunes.apple.com/verifyReceipt"]; // https://buy.itunes.apple.com/verifyReceipt
+    NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
+
+    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];
+    request.HTTPMethod = @"POST";
+
+    NSString *base64EncodedString = [receipts base64EncodedStringWithOptions:0];
+    NSDictionary *dictionary = @{@"receipt-data": base64EncodedString,
+                                 @"password"    : @"769f64132ec2417bb01f774eba815d1d"};
+    NSError *error = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:dictionary options:kNilOptions error:&error];
+
+    if (error)
+    {
+        completionBlock(NO);
+    }
+
+    NSURLSessionUploadTask *uploadTask = [session uploadTaskWithRequest:request
+                                                               fromData:data
+                                                      completionHandler:^(NSData *data,
+                                                                          NSURLResponse *response,
+                                                                          NSError *error)
+                                                      {
+                                                          NSError *jsonError;
+                                                          NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data
+                                                                                                               options:NSJSONReadingMutableContainers
+                                                                                                                 error:&jsonError];
+
+                                                          if (error)
+                                                          {
+                                                              completionBlock(NO);
+                                                          }
+
+                                                          NSArray *latestReceiptInfo = json[@"latest_receipt_info"];
+                                                          for (NSDictionary *info in latestReceiptInfo)
+                                                          {
+                                                              double now = [[NSDate date] timeIntervalSince1970];
+                                                              double expiresDateMs = [info[@"expires_date_ms"] doubleValue] / 1000.0;
+                                                              if (expiresDateMs > now)
+                                                              {
+                                                                  Purchase *purchase = [Purchase purchaseWithProductId:info[@"product_id"]
+                                                                                                          purchaseDate:[info[@"purchase_date_ms"] doubleValue] /
+                                                                                                                       1000
+                                                                                                           expiresDate:[info[@"expires_date_ms"] doubleValue] /
+                                                                                                                       1000];
+                                                                  [purchases addObject:purchase];
+                                                              }
+                                                          }
+                                                          completionBlock(YES);
+                                                      }];
+    [uploadTask resume];
+}
+
+- (NSData *)loadReceipts
+{
+    NSData *data = nil;
+    @try
+    {
+        NSURL *url = [[NSBundle mainBundle] appStoreReceiptURL];
+        data = [NSData dataWithContentsOfURL:url];
+    } @catch (NSException *e)
+    {
+        NSLog(@"Error loading receipt data: %@", e);
+    }
+    return data;
 }
 
 @end

@@ -8,6 +8,7 @@ class BillingProduct {
   BillingProduct({
     this.identifier,
     this.price,
+    this.introductoryPrice,
     this.title,
     this.description,
     this.currency,
@@ -24,6 +25,9 @@ class BillingProduct {
 
   /// Localized formatted product price including currency sign. e.g. $2.49.
   final String price;
+
+  /// Localized formatted introductory product price including currency sign. e.g. $2.49.
+  final String introductoryPrice;
 
   /// Localized product title.
   final String title;
@@ -44,6 +48,7 @@ class BillingProduct {
           runtimeType == other.runtimeType &&
           identifier == other.identifier &&
           price == other.price &&
+          introductoryPrice == other.introductoryPrice &&
           title == other.title &&
           description == other.description &&
           currency == other.currency &&
@@ -53,6 +58,7 @@ class BillingProduct {
   int get hashCode =>
       identifier.hashCode ^
       price.hashCode ^
+      introductoryPrice.hashCode ^
       title.hashCode ^
       description.hashCode ^
       currency.hashCode ^
@@ -60,7 +66,7 @@ class BillingProduct {
 
   @override
   String toString() {
-    return 'BillingProduct{sku: $identifier, price: $price, title: $title, '
+    return 'BillingProduct{sku: $identifier, price: $price, introductoryPrice: $introductoryPrice, title: $title, '
         'description: $description, currency: $currency, amount: $amount}';
   }
 }
@@ -74,6 +80,7 @@ class Purchase {
     this.identifier,
     this.purchaseToken,
     this.purchaseTime,
+    this.expiresTime,
     this.autorenewal,
   }) : assert(identifier != null);
 
@@ -81,13 +88,14 @@ class Purchase {
   final String packageName;
   final String identifier;
   final String purchaseToken;
-  final int purchaseTime;
+  final double purchaseTime;
+  final double expiresTime;
   final String autorenewal;
 
   @override
   String toString() {
     return 'Purchase{order: $orderId, package: $packageName, sku: $identifier,  '
-        'token: $purchaseToken, time: $purchaseTime, autorenewal: $autorenewal}';
+        'token: $purchaseToken, purchaseTime: $purchaseTime, expiresTime: $expiresTime, autorenewal: $autorenewal, subscribed: ${expiresTime > purchaseTime}';
   }
 }
 
@@ -123,19 +131,13 @@ class Billing {
     }
 
     return synchronized(this, () async {
-      try {
-        final Map<String, BillingProduct> products = new Map.fromIterable(
-          await _channel.invokeMethod('fetchProducts', {'identifiers': identifiers, 'type': type}),
-          key: (product) => product['identifier'],
-          value: (product) => _convertToBillingProduct(product),
-        );
-        _cachedProducts.addAll(products);
-        return products.values.toList();
-      } catch (e) {
-        print('failed to getProducts $identifiers - error: $e');
-        if (_onError != null) _onError(e);
-        return <BillingProduct>[];
-      }
+      final Map<String, BillingProduct> products = new Map.fromIterable(
+        await _channel.invokeMethod('fetchProducts', {'identifiers': identifiers, 'type': type}),
+        key: (product) => product['identifier'],
+        value: (product) => _convertToBillingProduct(product),
+      );
+      _cachedProducts.addAll(products);
+      return products.values.toList();
     });
   }
 
@@ -155,20 +157,14 @@ class Billing {
       return new Future.value(new Set.from(_purchasedProducts));
     }
     return synchronized(this, () async {
-      try {
-        final Map<String, Purchase> purchases = new Map.fromIterable(
-          await _channel.invokeMethod('fetchPurchases'),
-          key: (purchase) => purchase['orderId'],
-          value: (purchase) => _convertToPurchase(purchase),
-        );
-        _purchasedProducts.addAll(purchases.values);
-        _purchasesFetched = true;
-        return _purchasedProducts;
-      } catch (e) {
-        print('failed to getPurchases - error: $e');
-        if (_onError != null) _onError(e);
-        return new Set.identity();
-      }
+      final Map<String, Purchase> purchases = new Map.fromIterable(
+        await _channel.invokeMethod('fetchPurchases'),
+        key: (purchase) => purchase['orderId'],
+        value: (purchase) => _convertToPurchase(purchase),
+      );
+      _purchasedProducts.addAll(purchases.values);
+      _purchasesFetched = true;
+      return _purchasedProducts;
     });
   }
 
@@ -194,21 +190,15 @@ class Billing {
     }
 
     return synchronized(this, () async {
-      try {
-        final Map<String, Purchase> purchases = new Map.fromIterable(
-          await _channel.invokeMethod('purchase', {'identifier': identifier}),
-          key: (purchase) => purchase['orderId'],
-          value: (purchase) => _convertToPurchase(purchase),
-        );
-        _purchasedProducts.addAll(purchases.values);
-        _purchasesFetched = true;
-        final bool purchased = await isPurchased(identifier);
-        return purchased;
-      } catch (e) {
-        print('failed to purchase $identifier - error: $e');
-        if (_onError != null) _onError(e);
-        return false;
-      }
+      final Map<String, Purchase> purchases = new Map.fromIterable(
+        await _channel.invokeMethod('purchase', {'identifier': identifier}),
+        key: (purchase) => purchase['orderId'],
+        value: (purchase) => _convertToPurchase(purchase),
+      );
+      _purchasedProducts.addAll(purchases.values);
+      _purchasesFetched = true;
+      final bool purchased = await isPurchased(identifier);
+      return purchased;
     });
   }
 
@@ -221,22 +211,16 @@ class Billing {
     }
 
     return synchronized(this, () async {
-      try {
-        final Map<String, Purchase> purchases = new Map.fromIterable(
-          await _channel.invokeMethod('fetchSubscriptions'),
-          key: (purchase) => purchase['orderId'],
-          value: (purchase) {
-            return _convertToPurchase(purchase);
-          },
-        );
-        _subscribedProducts.addAll(purchases.values);
-        _subscriptionsFetched = true;
-        return _subscribedProducts;
-      } catch (e) {
-        print('failed to getSubscriptions - error: $e');
-        if (_onError != null) _onError(e);
-        return new Set.identity();
-      }
+      final Map<String, Purchase> purchases = new Map.fromIterable(
+        await _channel.invokeMethod('fetchSubscriptions'),
+        key: (purchase) => purchase['orderId'],
+        value: (purchase) {
+          return _convertToPurchase(purchase);
+        },
+      );
+      _subscribedProducts.addAll(purchases.values);
+      _subscriptionsFetched = true;
+      return _subscribedProducts;
     });
   }
 
@@ -252,7 +236,7 @@ class Billing {
 
     return purchases.where((Purchase purchase) {
       final DateTime expirationDate =
-          new DateTime.fromMillisecondsSinceEpoch(purchase.purchaseTime + subscriptionPeriodMillis);
+          new DateTime.fromMillisecondsSinceEpoch((purchase.purchaseTime + subscriptionPeriodMillis).toInt());
 
       return purchase.identifier == identifier && purchase.autorenewal == "true" ||
           (purchase.autorenewal == "false" && expirationDate.isAfter(now));
@@ -273,21 +257,15 @@ class Billing {
     }
 
     return synchronized(this, () async {
-      try {
-        final Map<String, Purchase> purchases = new Map.fromIterable(
-          await _channel.invokeMethod('subscribe', {'identifier': identifier}),
-          key: (purchase) => purchase['orderId'],
-          value: (purchase) => _convertToPurchase(purchase),
-        );
-        _subscribedProducts.addAll(purchases.values);
-        _subscriptionsFetched = true;
-        final bool purchased = await isSubscribed(identifier, subscriptionPeriodMillis);
-        return purchased;
-      } catch (e) {
-        print('failed to subscribe $identifier - error: $e');
-        if (_onError != null) _onError(e);
-        return false;
-      }
+      final Map<String, Purchase> purchases = new Map.fromIterable(
+        await _channel.invokeMethod('subscribe', {'identifier': identifier}),
+        key: (purchase) => purchase['orderId'],
+        value: (purchase) => _convertToPurchase(purchase),
+      );
+      _subscribedProducts.addAll(purchases.values);
+      _subscriptionsFetched = true;
+      final bool purchased = await isSubscribed(identifier, subscriptionPeriodMillis);
+      return purchased;
     });
   }
 }
@@ -297,6 +275,7 @@ BillingProduct _convertToBillingProduct(Map<dynamic, dynamic> product) {
   return new BillingProduct(
     identifier: product['identifier'],
     price: product['price'],
+    introductoryPrice: product['introductoryPrice'],
     title: product['title'],
     description: product['description'],
     currency: product['currency'],
@@ -312,6 +291,7 @@ Purchase _convertToPurchase(Map<dynamic, dynamic> purchase) {
     identifier: purchase['identifier'],
     purchaseToken: purchase['purchaseToken'],
     purchaseTime: purchase['purchaseTime'],
+    expiresTime: purchase['expiresTime'],
     autorenewal: purchase['autorenewal'],
   );
 }

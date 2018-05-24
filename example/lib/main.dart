@@ -9,11 +9,7 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  @override
-  initState() {
-    super.initState();
-    _initBilling();
-  }
+  final Billing billing = new Billing();
 
   @override
   Widget build(BuildContext context) {
@@ -22,34 +18,59 @@ class _MyAppState extends State<MyApp> {
         appBar: new AppBar(
           title: new Text('Plugin example app'),
         ),
-        body: new Center(
-          child: new Text('Billing.'),
+        body: new Column(
+          children: <Widget>[
+            FlatButton(
+              onPressed: _fetchProducts,
+              child: const Text('fetchProducts'),
+              padding: const EdgeInsets.all(20.0),
+            ),
+            FlatButton(
+              onPressed: _purchase,
+              child: const Text('buy something'),
+              padding: const EdgeInsets.all(20.0),
+            ),
+            FlatButton(
+              onPressed: _fetchPurchases,
+              child: const Text('fetchPurchases'),
+              padding: const EdgeInsets.all(20.0),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  void _initBilling() async {
-    Billing billing = new Billing();
-
-    billing.getProducts(<String>['coach_yourself_training'], 'subs').then((billingProducts) {
-      print("initBilling(): got products: ${billingProducts}");
-    }, onError: (dynamic error) {
-      print("initBilling(): got an error: $error");
-    });
-
-    billing.getPurchases().then((Set<String> purchases) {
-      print("initBilling(): purchases: $purchases");
-    }, onError: (dynamic error) {
-      print("initBilling(): getPurchases(): got an error: $error");
-    });
-
-    final bool isPurchased = await billing.isPurchased('coach_yourself_training');
-    print('coach_yourself_training isPurchased: $isPurchased');
-
-    if (!isPurchased)
-      billing.purchase('coach_yourself_training').then((bool purchased) {
-        print('coach_yourself_training purchased: $purchased');
+  void _fetchProducts() {
+    billing.getProducts(
+      <String>[
+        'Test_Abo_01',
+        'Test_Abo_02',
+        'Test_Abo_03',
+      ],
+      'subs',
+    ).then((List<BillingProduct> billingProducts) {
+      billingProducts.forEach((BillingProduct product) {
+        print("_fetchProducts: got products: $product");
       });
+    }, onError: (dynamic error) {
+      print("_fetchProducts): got an error: $error");
+    });
+  }
+
+  void _purchase() {
+    billing.purchase('Test_Abo_01').then((bool success) {
+      print("_purchase: success: $success");
+    }, onError: (dynamic error) {
+      print("_purchase: purchase(): got an error: $error");
+    });
+  }
+
+  void _fetchPurchases() {
+    billing.getPurchases().then((purchases) {
+      print("_fetchPurchases: purchases: $purchases");
+    }, onError: (dynamic error) {
+      print("_fetchPurchases: getPurchases(): got an error: $error");
+    });
   }
 }

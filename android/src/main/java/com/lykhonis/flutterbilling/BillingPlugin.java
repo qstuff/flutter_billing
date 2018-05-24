@@ -249,6 +249,7 @@ public final class BillingPlugin implements MethodCallHandler {
         final Map<String, Object> product = new HashMap<>();
         product.put("identifier", detail.getSku());
         product.put("price", detail.getPrice());
+        product.put("introductoryPrice", detail.getIntroductoryPrice());
         product.put("title", detail.getTitle());
         product.put("description", detail.getDescription());
         product.put("currency", detail.getPriceCurrencyCode());
