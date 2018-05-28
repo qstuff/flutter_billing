@@ -39,7 +39,7 @@ class BillingProduct {
   final String currency;
 
   /// Price in 100s. e.g. $2.49 equals 249.
-  final int amount;
+  final num amount;
 
   @override
   bool operator ==(Object other) =>
@@ -88,8 +88,8 @@ class Purchase {
   final String packageName;
   final String identifier;
   final String purchaseToken;
-  final double purchaseTime;
-  final double expiresTime;
+  final num purchaseTime;
+  final num expiresTime;
   final String autorenewal;
 
   @override
