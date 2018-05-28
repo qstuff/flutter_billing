@@ -39,7 +39,7 @@ class BillingProduct {
   final String currency;
 
   /// Price in 100s. e.g. $2.49 equals 249.
-  final num amount;
+  final int amount;
 
   @override
   bool operator ==(Object other) =>
@@ -88,14 +88,14 @@ class Purchase {
   final String packageName;
   final String identifier;
   final String purchaseToken;
-  final num purchaseTime;
-  final num expiresTime;
+  final int purchaseTime;
+  final int expiresTime;
   final String autorenewal;
 
   @override
   String toString() {
     return 'Purchase{order: $orderId, package: $packageName, sku: $identifier,  '
-        'token: $purchaseToken, purchaseTime: $purchaseTime, expiresTime: $expiresTime, autorenewal: $autorenewal, subscribed: ${expiresTime > purchaseTime}';
+        'token: $purchaseToken, purchaseTime: $purchaseTime, expiresTime: $expiresTime, autorenewal: $autorenewal';
   }
 }
 
@@ -285,13 +285,15 @@ BillingProduct _convertToBillingProduct(Map<dynamic, dynamic> product) {
 
 Purchase _convertToPurchase(Map<dynamic, dynamic> purchase) {
   assert(purchase != null);
+  final num purchaseTime = purchase['purchaseTime'];
+  final num expiresTime = purchase['expiresTime'];
   return new Purchase(
     orderId: purchase['orderId'],
     packageName: purchase['packageName'],
     identifier: purchase['identifier'],
     purchaseToken: purchase['purchaseToken'],
-    purchaseTime: purchase['purchaseTime'],
-    expiresTime: purchase['expiresTime'],
+    purchaseTime: purchaseTime?.toInt() ?? 0,
+    expiresTime: expiresTime?.toInt() ?? 0,
     autorenewal: purchase['autorenewal'],
   );
 }

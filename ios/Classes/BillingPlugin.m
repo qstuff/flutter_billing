@@ -345,10 +345,8 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
                                                               if (expiresDateMs > now)
                                                               {
                                                                   Purchase *purchase = [Purchase purchaseWithProductId:info[@"product_id"]
-                                                                                                          purchaseDate:[info[@"purchase_date_ms"] doubleValue] /
-                                                                                                                       1000
-                                                                                                           expiresDate:[info[@"expires_date_ms"] doubleValue] /
-                                                                                                                       1000];
+                                                                                                          purchaseDate:[info[@"purchase_date_ms"] doubleValue]
+                                                                                                           expiresDate:[info[@"expires_date_ms"] doubleValue]];
                                                                   [purchases addObject:purchase];
                                                               }
                                                           }
