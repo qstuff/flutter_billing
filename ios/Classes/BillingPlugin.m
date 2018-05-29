@@ -303,7 +303,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
         completionBlock(NO);
     }
 
-    NSURL *url = [NSURL URLWithString:@"https://sandbox.itunes.apple.com/verifyReceipt"]; // https://buy.itunes.apple.com/verifyReceipt
+    NSURL *url = [NSURL URLWithString:@"https://buy.itunes.apple.com/verifyReceipt"]; // https://sandbox.itunes.apple.com/verifyReceipt
     NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
     NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
 
