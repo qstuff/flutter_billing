@@ -120,7 +120,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
         if (product.productIdentifier == nil ||
             product.localizedTitle == nil ||
             product.localizedDescription == nil ||
-            product.priceLocale == nil || product.priceLocale.currencyCode == nil ||
+            product.priceLocale == nil ||
             product.price == nil)
         {
             return;
@@ -129,8 +129,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
         NSMutableDictionary<NSString *, id> *values = [[NSMutableDictionary alloc] init];
         values[@"identifier"] = product.productIdentifier;
         values[@"price"] = [currencyFormatter stringFromNumber:product.price];
-        if ([product respondsToSelector:@selector(introductoryPrice)])
-        {
+        if (@available(iOS 11_2, *)) {
             if (product.introductoryPrice != nil && product.introductoryPrice.price != nil)
             {
                 values[@"introductoryPrice"] = [currencyFormatter stringFromNumber:product.introductoryPrice.price];
@@ -138,7 +137,10 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
         }
         values[@"title"] = product.localizedTitle;
         values[@"description"] = product.localizedDescription;
-        values[@"currency"] = product.priceLocale.currencyCode;
+        if (@available(iOS 10, *)) {
+            if (product.priceLocale.currencyCode != nil)
+               values[@"currency"] = product.priceLocale.currencyCode;
+        }
         values[@"amount"] = @((int) ceil(product.price.doubleValue * 100));
 
         [allValues addObject:values];
@@ -177,7 +179,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
         NSMutableArray *list = [[NSMutableArray alloc] init];
         for (Purchase *purchase in self.purchases)
         {
-            if (purchase.productId == nil || purchase.purchaseDate == nil)
+            if (purchase.productId == nil)
             {
                 continue;
             }
@@ -185,10 +187,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
             NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
             result[@"identifier"] = purchase.productId;
             result[@"purchaseTime"] = @(purchase.purchaseDate);
-            if (purchase.expiresDate != nil)
-            {
                 result[@"expiresTime"] = @(purchase.expiresDate);
-            }
             [list addObject:result];
         }
 
@@ -271,7 +270,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
     NSMutableArray *list = [[NSMutableArray alloc] init];
     for (Purchase *purchase in purchases)
     {
-        if (purchase.productId == nil || purchase.purchaseDate == nil)
+        if (purchase.productId == nil)
         {
             continue;
         }
@@ -279,10 +278,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
         NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
         result[@"identifier"] = purchase.productId;
         result[@"purchaseTime"] = @(purchase.purchaseDate);
-        if (purchase.expiresDate != nil)
-        {
             result[@"expiresTime"] = @(purchase.expiresDate);
-        }
         [list addObject:result];
     }
 
