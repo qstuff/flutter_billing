@@ -120,7 +120,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
         if (product.productIdentifier == nil ||
             product.localizedTitle == nil ||
             product.localizedDescription == nil ||
-            product.priceLocale == nil ||
+            product.priceLocale == nil || product.priceLocale.currencyCode == nil ||
             product.price == nil)
         {
             return;
@@ -131,7 +131,10 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
         values[@"price"] = [currencyFormatter stringFromNumber:product.price];
         if ([product respondsToSelector:@selector(introductoryPrice)])
         {
-            values[@"introductoryPrice"] = [currencyFormatter stringFromNumber:product.introductoryPrice.price];
+            if (product.introductoryPrice != nil && product.introductoryPrice.price != nil)
+            {
+                values[@"introductoryPrice"] = [currencyFormatter stringFromNumber:product.introductoryPrice.price];
+            }
         }
         values[@"title"] = product.localizedTitle;
         values[@"description"] = product.localizedDescription;
@@ -159,8 +162,8 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
 {
     [self verifyReceipts:^(BOOL success)
     {
-        NSArray<FlutterResult> *results = [NSArray arrayWithArray:fetchPurchases];
-        [fetchPurchases removeAllObjects];
+        NSArray<FlutterResult> *results = [NSArray arrayWithArray:self.fetchPurchases];
+        [self.fetchPurchases removeAllObjects];
 
         if (!success)
         {
@@ -172,12 +175,20 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
         }
 
         NSMutableArray *list = [[NSMutableArray alloc] init];
-        for (Purchase *purchase in purchases)
+        for (Purchase *purchase in self.purchases)
         {
+            if (purchase.productId == nil || purchase.purchaseDate == nil)
+            {
+                continue;
+            }
+
             NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
             result[@"identifier"] = purchase.productId;
             result[@"purchaseTime"] = @(purchase.purchaseDate);
-            result[@"expiresTime"] = @(purchase.expiresDate);
+            if (purchase.expiresDate != nil)
+            {
+                result[@"expiresTime"] = @(purchase.expiresDate);
+            }
             [list addObject:result];
         }
 
@@ -247,11 +258,11 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
         Purchase *purchase = [Purchase purchaseWithProductId:transaction.payment.productIdentifier
                                                 purchaseDate:0
                                                  expiresDate:0];
-        [purchases addObject:purchase];
-        FlutterResult result = requestedPayments[transaction.payment];
+        [self.purchases addObject:purchase];
+        FlutterResult result = self.requestedPayments[transaction.payment];
         if (result != nil)
         {
-            [requestedPayments removeObjectForKey:transaction.payment];
+            [self.requestedPayments removeObjectForKey:transaction.payment];
             [results addObject:result];
         }
         [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
@@ -260,10 +271,18 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
     NSMutableArray *list = [[NSMutableArray alloc] init];
     for (Purchase *purchase in purchases)
     {
+        if (purchase.productId == nil || purchase.purchaseDate == nil)
+        {
+            continue;
+        }
+
         NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
         result[@"identifier"] = purchase.productId;
         result[@"purchaseTime"] = @(purchase.purchaseDate);
-        result[@"expiresTime"] = @(purchase.expiresDate);
+        if (purchase.expiresDate != nil)
+        {
+            result[@"expiresTime"] = @(purchase.expiresDate);
+        }
         [list addObject:result];
     }
 
@@ -285,10 +304,10 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
 {
     [transactions enumerateObjectsUsingBlock:^(SKPaymentTransaction *transaction, NSUInteger idx, BOOL *stop)
     {
-        FlutterResult result = requestedPayments[transaction.payment];
+        FlutterResult result = self.requestedPayments[transaction.payment];
         if (result != nil)
         {
-            [requestedPayments removeObjectForKey:transaction.payment];
+            [self.requestedPayments removeObjectForKey:transaction.payment];
             result([FlutterError errorWithCode:@"ERROR" message:@"Failed to make a payment!" details:nil]);
         }
         [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
@@ -347,7 +366,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
                                                                   Purchase *purchase = [Purchase purchaseWithProductId:info[@"product_id"]
                                                                                                           purchaseDate:[info[@"purchase_date_ms"] doubleValue]
                                                                                                            expiresDate:[info[@"expires_date_ms"] doubleValue]];
-                                                                  [purchases addObject:purchase];
+                                                                  [self.purchases addObject:purchase];
                                                               }
                                                           }
                                                           completionBlock(YES);
