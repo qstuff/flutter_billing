@@ -316,6 +316,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
     if (receipts == nil)
     {
         completionBlock(NO);
+        return;
     }
 
     NSURL *url = [NSURL URLWithString:@"https://buy.itunes.apple.com/verifyReceipt"]; // https://sandbox.itunes.apple.com/verifyReceipt
@@ -334,6 +335,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
     if (error)
     {
         completionBlock(NO);
+        return;
     }
 
     NSURLSessionUploadTask *uploadTask = [session uploadTaskWithRequest:request
@@ -350,6 +352,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
                                                           if (error)
                                                           {
                                                               completionBlock(NO);
+                                                              return;
                                                           }
 
                                                           NSArray *latestReceiptInfo = json[@"latest_receipt_info"];
@@ -366,6 +369,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
                                                               }
                                                           }
                                                           completionBlock(YES);
+                                                          return;
                                                       }];
     [uploadTask resume];
 }
