@@ -12,7 +12,7 @@
 
 @end
 
-typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
+typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error);
 
 @implementation BillingPlugin
 
@@ -162,7 +162,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
 
 - (void)paymentQueueRestoreCompletedTransactionsFinished:(SKPaymentQueue *)queue
 {
-    [self verifyReceipts:^(BOOL success)
+    [self verifyReceipts:^(BOOL success, NSError *error)
     {
         NSArray<FlutterResult> *results = [NSArray arrayWithArray:self.fetchPurchases];
         [self.fetchPurchases removeAllObjects];
@@ -171,7 +171,9 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
         {
             [results enumerateObjectsUsingBlock:^(FlutterResult result, NSUInteger idx, BOOL *stop)
             {
-                result([FlutterError errorWithCode:@"ERROR" message:@"Failed to verify receipts!" details:nil]);
+                result([FlutterError errorWithCode:@"ERROR"
+                                           message:@"Failed to verify receipts!"
+                                           details:error == nil ? nil : error.localizedDescription]);
             }];
             return;
         }
@@ -187,7 +189,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
             NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
             result[@"identifier"] = purchase.productId;
             result[@"purchaseTime"] = @(purchase.purchaseDate);
-                result[@"expiresTime"] = @(purchase.expiresDate);
+            result[@"expiresTime"] = @(purchase.expiresDate);
             [list addObject:result];
         }
 
@@ -315,7 +317,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
     NSData *receipts = [self loadReceipts];
     if (receipts == nil)
     {
-        completionBlock(NO);
+        completionBlock(YES, nil);
         return;
     }
 
@@ -334,7 +336,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
 
     if (error)
     {
-        completionBlock(NO);
+        completionBlock(NO, error);
         return;
     }
 
@@ -351,7 +353,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
 
                                                           if (error)
                                                           {
-                                                              completionBlock(NO);
+                                                              completionBlock(NO, error);
                                                               return;
                                                           }
 
@@ -368,7 +370,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success);
                                                                   [self.purchases addObject:purchase];
                                                               }
                                                           }
-                                                          completionBlock(YES);
+                                                          completionBlock(YES, nil);
                                                           return;
                                                       }];
     [uploadTask resume];
