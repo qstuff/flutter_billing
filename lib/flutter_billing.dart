@@ -178,11 +178,14 @@ class Billing {
   }
 
   /// Purchase a product.
+  /// [identifier] id of the product to purchase.
+  /// [appSharedSecret] Apples app shared secret. Only for Apple, ignored for Android.
   ///
   /// This would trigger platform UI to walk a user through steps of purchasing the product.
   /// Returns updated list of product identifiers that have been purchased.
-  Future<bool> purchase(String identifier) async {
+  Future<bool> purchase(String identifier, String appSharedSecret) async {
     assert(identifier != null);
+    assert(appSharedSecret != null);
 
     final bool purchased = await isPurchased(identifier);
     if (purchased) {
@@ -191,7 +194,7 @@ class Billing {
 
     return synchronized(this, () async {
       final Map<String, Purchase> purchases = new Map.fromIterable(
-        await _channel.invokeMethod('purchase', {'identifier': identifier}),
+        await _channel.invokeMethod('purchase', {'identifier': identifier, 'app_shared_secret': appSharedSecret}),
         key: (purchase) => purchase['orderId'],
         value: (purchase) => _convertToPurchase(purchase),
       );

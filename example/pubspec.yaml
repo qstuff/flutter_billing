@@ -4,12 +4,7 @@ description: Demonstrates how to use the flutter_billing plugin.
 dependencies:
   flutter:
     sdk: flutter
-
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^0.1.0
-
-  synchronized: 1.1.0
+  synchronized: 1.5.3
 
 dev_dependencies:
   flutter_test:

@@ -7,7 +7,7 @@ homepage: https://github.com/VolodymyrLykhonis/flutter_billing
 dependencies:
   flutter:
     sdk: flutter
-  synchronized: ^1.1.0
+  synchronized: 1.5.3
 
 flutter:
   plugin:
@@ -16,4 +16,3 @@ flutter:
 
 environment:
   sdk: ">=2.0.0-dev.28.0 <3.0.0"
-  flutter: ">=0.1.4 <2.0.0"

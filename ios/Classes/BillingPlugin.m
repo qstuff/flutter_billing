@@ -9,10 +9,11 @@
 @property(atomic, retain) NSArray<SKProduct *> *products;
 @property(atomic, retain) NSMutableSet<Purchase *> *purchases;
 @property(nonatomic, retain) FlutterMethodChannel *channel;
+@property(nonatomic, retain) NSString *appSharedSecret;
 
 @end
 
-typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error);
+typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error, BOOL useSandbox);
 
 @implementation BillingPlugin
 
@@ -22,6 +23,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error);
 @synthesize products;
 @synthesize purchases;
 @synthesize channel;
+@synthesize appSharedSecret;
 
 + (void)registerWithRegistrar:(NSObject <FlutterPluginRegistrar> *)registrar
 {
@@ -55,14 +57,13 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error);
     if ([@"fetchProducts" isEqualToString:call.method])
     {
         NSArray<NSString *> *identifiers = (NSArray<NSString *> *) call.arguments[@"identifiers"];
-        if (identifiers != nil)
+        if (identifiers == nil || [identifiers count] == 0)
         {
-            [self fetchProducts:identifiers result:result];
+            result([FlutterError errorWithCode:@"ERROR" message:@"Invalid or missing argument 'identifiers'" details:nil]);
+            return;
         }
-        else
-        {
-            result([FlutterError errorWithCode:@"ERROR" message:@"Invalid or missing arguments!" details:nil]);
-        }
+
+        [self fetchProducts:identifiers result:result];
     }
     else if ([@"fetchPurchases" isEqualToString:call.method])
     {
@@ -71,14 +72,20 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error);
     else if ([@"purchase" isEqualToString:call.method])
     {
         NSString *identifier = (NSString *) call.arguments[@"identifier"];
-        if (identifier != nil)
+        if (identifier == nil)
         {
-            [self purchase:identifier result:result];
+            result([FlutterError errorWithCode:@"ERROR" message:@"Invalid or missing argument 'identifier'" details:nil]);
+            return;
         }
-        else
+
+        NSString *appSharedSecret = (NSString *) call.arguments[@"app_shared_secret"];
+        if (appSharedSecret == nil)
         {
-            result([FlutterError errorWithCode:@"ERROR" message:@"Invalid or missing arguments!" details:nil]);
+            result([FlutterError errorWithCode:@"ERROR" message:@"Invalid or missing argument 'app_shared_secret'" details:nil]);
+            return;
         }
+        [self setAppSharedSecret:appSharedSecret];
+        [self purchase:identifier result:result];
     }
     else
     {
@@ -129,7 +136,8 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error);
         NSMutableDictionary<NSString *, id> *values = [[NSMutableDictionary alloc] init];
         values[@"identifier"] = product.productIdentifier;
         values[@"price"] = [currencyFormatter stringFromNumber:product.price];
-        if (@available(iOS 11_2, *)) {
+        if (@available(iOS 11_2, *))
+        {
             if (product.introductoryPrice != nil && product.introductoryPrice.price != nil)
             {
                 values[@"introductoryPrice"] = [currencyFormatter stringFromNumber:product.introductoryPrice.price];
@@ -137,9 +145,12 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error);
         }
         values[@"title"] = product.localizedTitle;
         values[@"description"] = product.localizedDescription;
-        if (@available(iOS 10, *)) {
+        if (@available(iOS 10, *))
+        {
             if (product.priceLocale.currencyCode != nil)
-               values[@"currency"] = product.priceLocale.currencyCode;
+            {
+                values[@"currency"] = product.priceLocale.currencyCode;
+            }
         }
         values[@"amount"] = @((int) ceil(product.price.doubleValue * 100));
 
@@ -162,45 +173,58 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error);
 
 - (void)paymentQueueRestoreCompletedTransactionsFinished:(SKPaymentQueue *)queue
 {
-    [self verifyReceipts:^(BOOL success, NSError *error)
+    [self verifyReceiptsProduction:^(BOOL success, NSError *error, BOOL useSandbox)
     {
-        NSArray<FlutterResult> *results = [NSArray arrayWithArray:self.fetchPurchases];
-        [self.fetchPurchases removeAllObjects];
-
-        if (!success)
+        if (useSandbox)
         {
-            [results enumerateObjectsUsingBlock:^(FlutterResult result, NSUInteger idx, BOOL *stop)
+            [self verifyReceiptsSandbox:^(BOOL success, NSError *error, BOOL useSandbox)
             {
-                result([FlutterError errorWithCode:@"ERROR"
-                                           message:@"Failed to verify receipts!"
-                                           details:error == nil ? nil : error.localizedDescription]);
+                [self handleValidationResult:success error:error];
             }];
-            return;
         }
-
-        NSMutableArray *list = [[NSMutableArray alloc] init];
-        for (Purchase *purchase in self.purchases)
+        else
         {
-            if (purchase.productId == nil)
-            {
-                continue;
-            }
-
-            NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
-            result[@"identifier"] = purchase.productId;
-            result[@"purchaseTime"] = @(purchase.purchaseDate);
-            result[@"expiresTime"] = @(purchase.expiresDate);
-            [list addObject:result];
+            [self handleValidationResult:success error:error];
         }
-
-        [results enumerateObjectsUsingBlock:^(FlutterResult result, NSUInteger idx, BOOL *stop)
-        {
-            result(list);
-        }];
     }];
 }
 
-- (void) paymentQueue:(SKPaymentQueue *)queue restoreCompletedTransactionsFailedWithError:(NSError *)error
+- (void)handleValidationResult:(BOOL)success error:(NSError *)error
+{
+    NSArray<FlutterResult> *results = [NSArray arrayWithArray:self.fetchPurchases];
+    [self.fetchPurchases removeAllObjects];
+
+    if (!success)
+    {
+        [results enumerateObjectsUsingBlock:^(FlutterResult result, NSUInteger idx, BOOL *stop)
+        {
+            result([FlutterError errorWithCode:@"ERROR" message:@"Failed to verify receipts!" details:error == nil ? nil : error.localizedDescription]);
+        }];
+        return;
+    }
+
+    NSMutableArray *list = [[NSMutableArray alloc] init];
+    for (Purchase *purchase in self.purchases)
+    {
+        if (purchase.productId == nil)
+        {
+            continue;
+        }
+
+        NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
+        result[@"identifier"] = purchase.productId;
+        result[@"purchaseTime"] = @(purchase.purchaseDate);
+        result[@"expiresTime"] = @(purchase.expiresDate);
+        [list addObject:result];
+    }
+
+    [results enumerateObjectsUsingBlock:^(FlutterResult result, NSUInteger idx, BOOL *stop)
+    {
+        result(list);
+    }];
+}
+
+- (void)paymentQueue:(SKPaymentQueue *)queue restoreCompletedTransactionsFailedWithError:(NSError *)error
 {
     FlutterError *resultError = [FlutterError errorWithCode:@"ERROR" message:@"Failed to restore purchases!" details:nil];
     NSArray<FlutterResult> *results = [NSArray arrayWithArray:fetchPurchases];
@@ -280,7 +304,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error);
         NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
         result[@"identifier"] = purchase.productId;
         result[@"purchaseTime"] = @(purchase.purchaseDate);
-            result[@"expiresTime"] = @(purchase.expiresDate);
+        result[@"expiresTime"] = @(purchase.expiresDate);
         [list addObject:result];
     }
 
@@ -312,16 +336,26 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error);
     }];
 }
 
-- (void)verifyReceipts:(VerifyReceiptsCompletionBlock)completionBlock
+- (void)verifyReceiptsProduction:(VerifyReceiptsCompletionBlock)completionBlock
+{
+    [self verifyReceipts:@"https://buy.itunes.apple.com/verifyReceipt" completio:completionBlock];
+}
+
+- (void)verifyReceiptsSandbox:(VerifyReceiptsCompletionBlock)completionBlock
+{
+    [self verifyReceipts:@"https://sandbox.itunes.apple.com/verifyReceipt" completio:completionBlock];
+}
+
+- (void)verifyReceipts:(NSString *)urlString completio:(VerifyReceiptsCompletionBlock)completionBlock
 {
     NSData *receipts = [self loadReceipts];
     if (receipts == nil)
     {
-        completionBlock(YES, nil);
+        completionBlock(YES, nil, NO);
         return;
     }
 
-    NSURL *url = [NSURL URLWithString:@"https://buy.itunes.apple.com/verifyReceipt"]; // https://sandbox.itunes.apple.com/verifyReceipt
+    NSURL *url = [NSURL URLWithString:urlString];
     NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
     NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
 
@@ -329,14 +363,15 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error);
     request.HTTPMethod = @"POST";
 
     NSString *base64EncodedString = [receipts base64EncodedStringWithOptions:0];
-    NSDictionary *dictionary = @{@"receipt-data": base64EncodedString,
-                                 @"password"    : @"769f64132ec2417bb01f774eba815d1d"};
+    NSDictionary *dictionary = @{@"receipt-data"            : base64EncodedString,
+                                 @"password"                : self.appSharedSecret,
+                                 @"exclude-old-transactions": @YES};
     NSError *error = nil;
     NSData *data = [NSJSONSerialization dataWithJSONObject:dictionary options:kNilOptions error:&error];
 
     if (error)
     {
-        completionBlock(NO, error);
+        completionBlock(NO, error, NO);
         return;
     }
 
@@ -353,7 +388,16 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error);
 
                                                           if (error)
                                                           {
-                                                              completionBlock(NO, error);
+                                                              completionBlock(NO, error, NO);
+                                                              return;
+                                                          }
+
+                                                          int statusCode = [json[@"status"] intValue];
+                                                          if (statusCode == 21007)
+                                                          {
+                                                              // This receipt is from the test environment, but it was sent to the production environment for verification.
+                                                              // Send it to the test environment instead.
+                                                              completionBlock(NO, error, YES);
                                                               return;
                                                           }
 
@@ -370,7 +414,7 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error);
                                                                   [self.purchases addObject:purchase];
                                                               }
                                                           }
-                                                          completionBlock(YES, nil);
+                                                          completionBlock(YES, nil, NO);
                                                           return;
                                                       }];
     [uploadTask resume];
