@@ -115,6 +115,12 @@ class Billing {
   final Set<Purchase> _subscribedProducts = new Set();
   bool _subscriptionsFetched = false;
 
+  /// Set the shared secret to verify Apple InApp purchases and/or subscriptions.
+  /// Not used for Android.
+  Future<void> setAppSharedSecret(String appSharedSecret) async {
+    await _channel.invokeMethod('appSharedSecret ', {'appSharedSecret': appSharedSecret});
+  }
+
   /// Products details of supplied product identifiers.
   ///
   /// Returns a list of products available to the app for a purchase.
@@ -122,7 +128,6 @@ class Billing {
   /// Note the behavior may differ from iOS and Android. Android most likely to throw in a case
   /// of error, while iOS would return a list of only products that are available. In a case of
   /// error, it would return simply empty list.
-
   Future<List<BillingProduct>> getProducts(List<String> identifiers, String type) {
     assert(identifiers != null);
 
@@ -183,9 +188,8 @@ class Billing {
   ///
   /// This would trigger platform UI to walk a user through steps of purchasing the product.
   /// Returns updated list of product identifiers that have been purchased.
-  Future<bool> purchase(String identifier, String appSharedSecret) async {
+  Future<bool> purchase(String identifier) async {
     assert(identifier != null);
-    assert(appSharedSecret != null);
 
     final bool purchased = await isPurchased(identifier);
     if (purchased) {
@@ -194,7 +198,7 @@ class Billing {
 
     return synchronized(this, () async {
       final Map<String, Purchase> purchases = new Map.fromIterable(
-        await _channel.invokeMethod('purchase', {'identifier': identifier, 'app_shared_secret': appSharedSecret}),
+        await _channel.invokeMethod('purchase', {'identifier': identifier}),
         key: (purchase) => purchase['orderId'],
         value: (purchase) => _convertToPurchase(purchase),
       );

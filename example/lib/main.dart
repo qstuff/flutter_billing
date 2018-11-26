@@ -13,6 +13,8 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
+    billing.setAppSharedSecret('secret');
+
     return new MaterialApp(
       home: new Scaffold(
         appBar: new AppBar(
@@ -59,7 +61,7 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _purchase() {
-    billing.purchase('Test_Abo_01', 'secret').then((bool success) {
+    billing.purchase('Test_Abo_01').then((bool success) {
       print("_purchase: success: $success");
     }, onError: (dynamic error) {
       print("_purchase: purchase(): got an error: $error");

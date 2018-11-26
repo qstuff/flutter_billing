@@ -92,6 +92,8 @@ public final class BillingPlugin implements MethodCallHandler {
             fetchSubscriptions(result);
         } else if ("subscribe".equals(methodCall.method)) {
             subscribe(methodCall.<String>argument("identifier"), result);
+        } else if ("appSharedSecret".equals(methodCall.method)) {
+            result.success(null);
         } else {
             result.notImplemented();
         }

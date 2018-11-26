@@ -77,7 +77,10 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error, BOOL
             result([FlutterError errorWithCode:@"ERROR" message:@"Invalid or missing argument 'identifier'" details:nil]);
             return;
         }
-
+        [self purchase:identifier result:result];
+    }
+    else if ([@"appSharedSecret" isEqualToString:call.method])
+    {
         NSString *appSharedSecret = (NSString *) call.arguments[@"app_shared_secret"];
         if (appSharedSecret == nil)
         {
@@ -85,7 +88,6 @@ typedef void (^VerifyReceiptsCompletionBlock)(BOOL success, NSError *error, BOOL
             return;
         }
         [self setAppSharedSecret:appSharedSecret];
-        [self purchase:identifier result:result];
     }
     else
     {
