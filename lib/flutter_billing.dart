@@ -118,7 +118,7 @@ class Billing {
   /// Set the shared secret to verify Apple InApp purchases and/or subscriptions.
   /// Not used for Android.
   Future<void> setAppSharedSecret(String appSharedSecret) async {
-    await _channel.invokeMethod('appSharedSecret ', {'appSharedSecret': appSharedSecret});
+    await _channel.invokeMethod('appSharedSecret', {'app_shared_secret': appSharedSecret});
   }
 
   /// Products details of supplied product identifiers.
