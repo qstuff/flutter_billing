@@ -209,6 +209,37 @@ class Billing {
     });
   }
 
+  /// Purchase a product. And retrieve the receipt.
+  /// Use this when you need the receipt data to do serverside validation
+  Future<Purchase> purchaseWithReceipt(String identifier) async {
+    assert(identifier != null);
+
+    print("FLUTTER_BILLIING: purchaseWithReceipt(): productId: $identifier");
+
+    final bool purchased = await isPurchased(identifier);
+    if (purchased) {
+      print("FLUTTER_BILLIING: purchaseWithReceipt(): already puchased");
+      // return new Future.value(null);
+    }
+
+    return synchronized(this, () async {
+      final Map<String, Purchase> purchases = new Map.fromIterable(
+        await _channel.invokeMethod('purchase', {'identifier': identifier}),
+        key: (purchase) => purchase['orderId'],
+        value: (purchase) => _convertToPurchase(purchase),
+      );
+
+      purchases.forEach((k,v) {
+        if (k == identifier) {
+          print("FLUTTER_BILLIING: purchaseWithReceipt(): got receipt");
+          return v;
+        }
+      });
+      // Something went wrong
+      return null;
+    });
+  }
+
   /// Subscribed products identifiers.
   ///
   /// Returns products identifiers that are already subscribed.
