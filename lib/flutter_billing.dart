@@ -95,7 +95,7 @@ class Purchase {
   @override
   String toString() {
     return 'Purchase{order: $orderId, package: $packageName, sku: $identifier,  '
-        'token: $purchaseToken, purchaseTime: $purchaseTime, expiresTime: $expiresTime, autorenewal: $autorenewal';
+        'purchaseToken: $purchaseToken, purchaseTime: $purchaseTime, expiresTime: $expiresTime, autorenewal: $autorenewal';
   }
 }
 
@@ -158,7 +158,10 @@ class Billing {
   ///
   /// Returns products identifiers that are already purchased.
   Future<Set<Purchase>> getPurchases() {
+    print("FLUTTER_BILLING: getPurchases():");
+
     if (_purchasesFetched) {
+      print("FLUTTER_BILLING: getPurchases(): already fetched");
       return new Future.value(new Set.from(_purchasedProducts));
     }
     return synchronized(this, () async {
@@ -167,6 +170,7 @@ class Billing {
         key: (purchase) => purchase['orderId'],
         value: (purchase) => _convertToPurchase(purchase),
       );
+      print("FLUTTER_BILLING: getPurchases(): fetched: ${purchases.values.length} products");
       _purchasedProducts.addAll(purchases.values);
       _purchasesFetched = true;
       return _purchasedProducts;
@@ -176,10 +180,21 @@ class Billing {
   /// Validate if a product is purchased.
   ///
   /// Returns true if a product is purchased, otherwise false.
+  ///
   Future<bool> isPurchased(String identifier) async {
     assert(identifier != null);
     final Set<Purchase> purchases = await getPurchases();
     return purchases.where((Purchase purchase) => purchase.identifier == identifier).isNotEmpty;
+  }
+
+  /// Validate if a product is purchased.
+  ///
+  /// Returns a [Purchase] if a product is purchased, otherwise null.
+  ///
+  Future<Purchase> getPurchase(String identifier) async {
+    assert(identifier != null);
+    final Set<Purchase> purchases = await getPurchases();
+    return purchases.where((Purchase purchase) => purchase.identifier == identifier).first;
   }
 
   /// Purchase a product.
@@ -188,17 +203,20 @@ class Billing {
   ///
   /// This would trigger platform UI to walk a user through steps of purchasing the product.
   /// Returns updated list of product identifiers that have been purchased.
-  Future<bool> purchase(String identifier) async {
+  Future<bool> purchase(String identifier, bool consume) async {
     assert(identifier != null);
+
+    print("FLUTTER_BILLING: purchase(): id: ${identifier}");
 
     final bool purchased = await isPurchased(identifier);
     if (purchased) {
+      print("FLUTTER_BILLING: purchase(): id: ${identifier} already purchased");
       return new Future.value(true);
     }
 
     return synchronized(this, () async {
       final Map<String, Purchase> purchases = new Map.fromIterable(
-        await _channel.invokeMethod('purchase', {'identifier': identifier}),
+        await _channel.invokeMethod('purchase', {'identifier': identifier, 'consume': consume}),
         key: (purchase) => purchase['orderId'],
         value: (purchase) => _convertToPurchase(purchase),
       );
@@ -211,32 +229,29 @@ class Billing {
 
   /// Purchase a product. And retrieve the receipt.
   /// Use this when you need the receipt data to do serverside validation
-  Future<Purchase> purchaseWithReceipt(String identifier) async {
+  /// 
+  Future<Purchase> purchaseWithReceipt(String identifier, bool consume) async {
     assert(identifier != null);
 
-    print("FLUTTER_BILLIING: purchaseWithReceipt(): productId: $identifier");
+    print("FLUTTER_BILLING: purchaseWithReceipt(): productId: $identifier");
 
     final bool purchased = await isPurchased(identifier);
+    
     if (purchased) {
-      print("FLUTTER_BILLIING: purchaseWithReceipt(): already puchased");
-      // return new Future.value(null);
+      print("FLUTTER_BILLING: purchaseWithReceipt(): already puchased");
+      //return new Future.value(null);
     }
 
     return synchronized(this, () async {
       final Map<String, Purchase> purchases = new Map.fromIterable(
-        await _channel.invokeMethod('purchase', {'identifier': identifier}),
-        key: (purchase) => purchase['orderId'],
+        await _channel.invokeMethod('purchase', {'identifier': identifier, 'consume': consume}),
+        key: (purchase) => purchase['identifier'],
         value: (purchase) => _convertToPurchase(purchase),
       );
-
-      purchases.forEach((k,v) {
-        if (k == identifier) {
-          print("FLUTTER_BILLIING: purchaseWithReceipt(): got receipt");
-          return v;
-        }
-      });
-      // Something went wrong
-      return null;
+      _purchasedProducts.addAll(purchases.values);
+      _purchasesFetched = true;
+      final Purchase purchase = await getPurchase(identifier);
+      return purchase;
     });
   }
 
@@ -322,10 +337,12 @@ BillingProduct _convertToBillingProduct(Map<dynamic, dynamic> product) {
 }
 
 Purchase _convertToPurchase(Map<dynamic, dynamic> purchase) {
+  print("_convertToPurchase(): $purchase");
   assert(purchase != null);
   final num purchaseTime = purchase['purchaseTime'];
   final num expiresTime = purchase['expiresTime'];
-  return new Purchase(
+
+  Purchase ret = new Purchase(
     orderId: purchase['orderId'],
     packageName: purchase['packageName'],
     identifier: purchase['identifier'],
@@ -334,4 +351,8 @@ Purchase _convertToPurchase(Map<dynamic, dynamic> purchase) {
     expiresTime: expiresTime?.toInt() ?? 0,
     autorenewal: purchase['autorenewal'],
   );
+
+  print("_convertToPurchase(): $ret");
+
+  return ret;
 }

@@ -15,10 +15,13 @@ import com.android.billingclient.api.PurchasesUpdatedListener;
 import com.android.billingclient.api.SkuDetails;
 import com.android.billingclient.api.SkuDetailsParams;
 import com.android.billingclient.api.SkuDetailsResponseListener;
+import com.android.billingclient.api.ConsumeResponseListener;
+
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -34,6 +37,7 @@ public final class BillingPlugin implements MethodCallHandler {
     private final Activity activity;
     private final BillingClient billingClient;
     private final Map<String, Result> pendingPurchaseRequests;
+    private final Map<String, Boolean> requestsToConsume;
 
     private boolean billingServiceConnected;
 
@@ -46,6 +50,7 @@ public final class BillingPlugin implements MethodCallHandler {
         this.activity = activity;
 
         pendingPurchaseRequests = new HashMap<>();
+        requestsToConsume = new HashMap<>();
 
         billingClient = BillingClient.newBuilder(activity)
                                      .setListener(new BillingListener())
@@ -87,8 +92,11 @@ public final class BillingPlugin implements MethodCallHandler {
         } else if ("fetchPurchases".equals(methodCall.method)) {
             fetchPurchases(result);
         } else if ("purchase".equals(methodCall.method)) {
-            purchase(methodCall.<String>argument("identifier"), result);
-        } else if ("fetchSubscriptions".equals(methodCall.method)) {
+            purchase(
+                methodCall.<String>argument("identifier"),
+                methodCall.<Boolean>argument("consume"),
+                result);
+        }  else if ("fetchSubscriptions".equals(methodCall.method)) {
             fetchSubscriptions(result);
         } else if ("subscribe".equals(methodCall.method)) {
             subscribe(methodCall.<String>argument("identifier"), result);
@@ -153,7 +161,10 @@ public final class BillingPlugin implements MethodCallHandler {
         });
     }
 
-    private void purchase(final String identifier, final Result result) {
+    private void purchase(final String identifier, final Boolean consume, final Result result) {
+
+        requestsToConsume.put(identifier, consume);
+
         executeServiceRequest(new Request() {
             @Override
             public void execute() {
@@ -165,6 +176,7 @@ public final class BillingPlugin implements MethodCallHandler {
                                          .build());
 
                 if (responseCode == BillingResponse.OK) {
+                    Log.d(TAG, "purchase(): result: " + result.toString());
                     pendingPurchaseRequests.put(identifier, result);
                 } else {
                     result.error("ERROR", "Failed to launch billing flow to purchase an item with error " + responseCode, null);
@@ -259,7 +271,7 @@ public final class BillingPlugin implements MethodCallHandler {
         return product;
     }
 
-    List<Map<String, Object>> convertPurchasesToListOfMaps(List<Purchase> purchases) {
+    private List<Map<String, Object>> convertPurchasesToListOfMaps(List<Purchase> purchases) {
         if (purchases == null) {
             return Collections.emptyList();
         }
@@ -271,7 +283,7 @@ public final class BillingPlugin implements MethodCallHandler {
         return list;
     }
 
-    static Map<String, Object> convertPurchaseToMap(Purchase purchase) {
+    private static Map<String, Object> convertPurchaseToMap(Purchase purchase) {
         final Map<String, Object> product = new HashMap<>();
         product.put("orderId", purchase.getOrderId());
         product.put("packageName", purchase.getPackageName());
@@ -325,11 +337,34 @@ public final class BillingPlugin implements MethodCallHandler {
     }
 
     final class BillingListener implements PurchasesUpdatedListener {
+
         @Override
         public void onPurchasesUpdated(int resultCode, List<Purchase> purchases) {
+
+            if (purchases != null) {
+                Log.d(TAG, "onPurchasesUpdated(): num: " + purchases.size());
+
+                for (Purchase p : purchases) {
+                    Boolean consume = requestsToConsume.remove(p.getSku());
+                    if (consume != null && consume == true) {
+                        Log.d("BillingPlugin", "onPurchasesUpdated(): consuming. token " + p.getPurchaseToken());
+
+                        billingClient.consumeAsync(p.getPurchaseToken(), new ConsumeResponseListener() {
+                            @Override
+                            public void onConsumeResponse(int responseCode, String purchaseToken) {
+                                Log.d("BillingPlugin", "onConsumeResponse(): consumed: " + purchaseToken);
+                            }
+                        });
+                    }
+                }
+            }
+
             if (resultCode == BillingResponse.OK && purchases != null) {
+
                 final List<Map<String, Object>> identifiers = convertPurchasesToListOfMaps(purchases);
                 for (final Map<String, Object> next : identifiers) {
+                    Log.d("BillingPlugin", "onPurchasesUpdated(): id: " + next);
+
                     final Result result = pendingPurchaseRequests.remove(next.get("identifier"));
                     if (result != null) {
                         result.success(identifiers);
